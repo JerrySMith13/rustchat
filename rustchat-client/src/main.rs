@@ -13,7 +13,7 @@ param3: val3
 
 
 */
-
+mod chat;
 
 struct ChatMetadata {
     peer_id: String,

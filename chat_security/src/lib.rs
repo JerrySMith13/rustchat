@@ -1,23 +1,28 @@
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{rngs::OsRng, CryptoRng};
+use rand::RngCore;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 
-fn generate_keys() {
-    let rng = StdRng::from_os_rng();
-    let secret = EphemeralSecret::random_from_rng(rng);
+struct SessionCrypt{
+    pk: PublicKey,
+    sk: EphemeralSecret,
 }
 
+impl SessionCrypt{
+    pub fn new<R>(mut rng: R) -> Self
+    where R: RngCore + CryptoRng
+    {
+        let sk = EphemeralSecret::random_from_rng(&mut rng);
+        let pk = PublicKey::from(&sk);
+        SessionCrypt {
+            pk,
+            sk,
+        }
 
-
-
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
 }
