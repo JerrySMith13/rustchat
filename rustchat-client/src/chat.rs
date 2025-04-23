@@ -7,23 +7,22 @@ use chat_security;
 /*
 Chat Handshake protocol:
 
+Each message contains shared secret, timestamp, contents, and 
+By rule, the one connecting sends their handshake first. 
+Messages are currently limited to 300 characters per message, but may add functionality to allow users to set personal limits later on
 
-
-
+SELF_ID > PEER_ID
+TIMESTAMP
+SHARED_SECRET
+MSG_DATA
 
 */
 
-struct ChatSessionData{
-    peer_id: String,
-    self_id: String,
-    
+struct Message{
+    timestamp: u64,
+    sender_id: String,
+    to_id: String,
+    contents: String,
 }
 
 
-impl ChatSessionData {
-    pub fn start_session_as_server(mut socket: TcpStream) -> Self{
-        let mut buf = [0u8; 1024];
-        socket.read(&mut buf).expect("Failed to read from socket");
-
-    }
-}
