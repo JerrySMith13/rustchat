@@ -82,7 +82,7 @@ struct EncryptedMessage {
 
  */
 #[derive(Serialize, Deserialize)]
-struct Message{
+pub struct Message{
     sender_id: String,
     to_id: String,
     contents: String,
@@ -122,12 +122,11 @@ impl Message{
 }
 
 
-struct SessionCryptData{
+pub struct SessionCryptData{
     cipher: XChaCha20Poly1305,
 
 }
 
-#[allow(dead_code)]
 impl SessionCryptData{
     fn derive_key(shared_secret: &[u8]) -> [u8; 32] {
         let hk = Hkdf::<Sha256>::new(None, shared_secret);
@@ -138,7 +137,7 @@ impl SessionCryptData{
     
     /// This function is called by the peer who initiated the connection (i.e. the one sending the initial handshake
     /// message)
-    fn start_session(stream: &mut TcpStream) -> Result<Self, std::io::Error>{
+    pub fn start_session(stream: &mut TcpStream) -> Result<Self, std::io::Error>{
         let self_secret = EphemeralSecret::random_from_rng(OsRng);
         let self_public = PublicKey::from(&self_secret);
 
@@ -157,7 +156,7 @@ impl SessionCryptData{
     
     }
 
-    fn recieve_session(stream: &mut TcpStream) -> Result<Self, std::io::Error>{
+    pub fn recieve_session(stream: &mut TcpStream) -> Result<Self, std::io::Error>{
         let self_secret = EphemeralSecret::random_from_rng(OsRng);
         let self_public = PublicKey::from(&self_secret);
 
@@ -176,7 +175,7 @@ impl SessionCryptData{
         });
     }
 
-    fn send_message(&self, stream: &mut TcpStream, message: Message) -> Result<(), std::io::Error>{
+    pub fn send_message(&self, stream: &mut TcpStream, message: Message) -> Result<(), std::io::Error>{
 
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let message = message.to_string();
@@ -194,7 +193,7 @@ impl SessionCryptData{
 
     }
 
-    fn recieve_message(&self, stream: &mut TcpStream) -> Result<Message, std::io::Error>{
+    pub fn recieve_message(&self, stream: &mut TcpStream) -> Result<Message, std::io::Error>{
         let buf = HandshakeData::read_length_prefixed(stream)?;
         let encrypted_message: EncryptedMessage = bincode::deserialize(&buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;

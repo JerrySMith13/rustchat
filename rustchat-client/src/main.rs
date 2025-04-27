@@ -1,79 +1,101 @@
-use std::net;
-use std::io::{Write, Read};
+use std::net::{TcpStream, SocketAddr, TcpListener};
+use std::io::{Error, ErrorKind}
 
-/*
-Chat protocol:
-Upon accepting a connection, the server will first send a handshake message to the client.
+use terminal_menu::*;
 
-Handshake message:
-HELLO <client_id> 
-param: val
-param2: val2
-param3: val3
+use chat_security::{SessionCryptData, Message};
 
 
-*/
-mod chat;
 
-struct ChatMetadata {
-    peer_id: String,
-    self_id: String,
-    self_random: String,
-    peer_random: String,
+fn run_server(socket_addr: SocketAddr) -> Result<SessionCryptData, Error>{
+
+    let listener = TcpListener::bind(socket_addr)?;
+    let mut stream = listener.accept()?.0;
+
+    SessionCryptData::recieve_session(&mut stream)
+
+
 }
 
+fn connect_to_peer(ip: SocketAddr) -> Result<SessionCryptData, Error>{
 
-fn server_handshake(socket: &mut net::TcpStream) {
-    let mut buffer = [0; 1024];
-    socket.read(&mut buffer).expect("Failed to read from socket");
+    let mut stream = TcpStream::connect(ip)?;
+
+    SessionCryptData::start_session(&mut stream)
+}
+
+fn try_display_listen() -> Result<SessionCryptData, Error> {
+
+    let menu = menu(vec![string("Enter a port number to listen from: (leave blank to let rustchat choose)", "", true)]);
+    run(&menu);
+    let menu = mut_menu(&menu);
+    let selection = menu.selection_value("Enter a port number to listen from: (leave blank to let rustchat choose)").trim();
+    let selection_num: u16;
+    if selection = "" { selection_num = 0; } 
+    else { 
+       if let Ok(parsed) != str::parse::<u16>(selection){
+            return Err(Error::new(ErrorKind::InvalidInput, "Invalid port number entered"));
+       }
+       else{
+            selection_num = parsed;
+       } 
+
+    }
+
+
+
+
     
+
+
 }
 
-fn run_server() {
-    let listener = net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind to address");
-    let port = listener.local_addr().unwrap().port();
-    println!("Server is running on port: {}", port);
-    match listener.accept(){
-        Ok((mut socket, addr)) => {
-            println!("Recieving connection from: {}", addr);
-            server_handshake(&mut socket);
+
+fn display_main_menu(label: &str){
+
+    let menu = terminal_menu::menu(vec![
+        label(label),
+        button("Start listening for a connection"),
+        button("Connect to a peer ip"),
+        button("Exit")
+
+    ]);
+
+    run(&menu);
+
+    let menu = mut_menu(&menu);
+    let selection = menu.selected_item_name();
+
+    match selection.trim(){
+
+        "Start listening for a connection" => {
+            
+        },
+
+        "Connect to a peer ip" => {
+            
 
         },
-        Err(e) => {
-            println!("Failed to accept connection: {}", e);
+
+        "Exit" => {
+            println!("Exiting...");
+            std::process::exit(0);
+
         }
+
+        _ => {
+            println!("Unexpected option, exiting...");
+            std::process::exit(1);
+
+        }
+
     }
 
 }
 
-fn chat(mut socket: net::TcpStream) {
-    println!("Connected to the server!");
-
-    loop {
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).expect("Failed to read line");
-        socket.write_all(input.as_bytes()).expect("Failed to send message");
-    }
+fn main(){
+    display_main_menu("Welcome to rustchat! Select an option: ");
 }
 
 
-fn main() {
-    println!("Welcome to RustChat!\n
-    This is a simple chat application written in Rust.\n
-    Options:\n
-    1. Start a server\n
-    2. Connect to a server\n
-    3. Exit\n");
 
-
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).expect("Failed to read line");
-    let choice: u32 = input.trim().parse().expect("Please enter a number");
-
-    match choice {
-        1 => run_server(),
-        2 => connect_to_server(),
-        3 => println!("Exiting..."),
-        _ => println!("Invalid choice. Please try again."),
-    }
-}    
