@@ -124,7 +124,7 @@ impl Message{
 
 pub struct SessionCryptData{
     cipher: XChaCha20Poly1305,
-
+    stream: TcpStream,
 }
 
 impl SessionCryptData{
@@ -137,11 +137,11 @@ impl SessionCryptData{
     
     /// This function is called by the peer who initiated the connection (i.e. the one sending the initial handshake
     /// message)
-    pub fn start_session(stream: &mut TcpStream) -> Result<Self, std::io::Error>{
+    pub fn start_session(mut stream: TcpStream) -> Result<Self, std::io::Error>{
         let self_secret = EphemeralSecret::random_from_rng(OsRng);
         let self_public = PublicKey::from(&self_secret);
 
-        let peer_public = HandshakeData::init_handshake(stream, self_public)?;
+        let peer_public = HandshakeData::init_handshake(&mut stream, self_public)?;
         let peer_public = PublicKey::from(peer_public.public_key);
 
         let shared = self_secret.diffie_hellman(&peer_public);
@@ -152,15 +152,16 @@ impl SessionCryptData{
 
         return Ok(SessionCryptData{
             cipher,
+            stream
         });
     
     }
 
-    pub fn recieve_session(stream: &mut TcpStream) -> Result<Self, std::io::Error>{
+    pub fn recieve_session(mut stream: TcpStream) -> Result<Self, std::io::Error>{
         let self_secret = EphemeralSecret::random_from_rng(OsRng);
         let self_public = PublicKey::from(&self_secret);
 
-        let peer_public = HandshakeData::recieve_handshake(stream, self_public)?;
+        let peer_public = HandshakeData::recieve_handshake(&mut stream, self_public)?;
         let peer_public = PublicKey::from(peer_public.public_key);
 
         
@@ -172,10 +173,11 @@ impl SessionCryptData{
 
         return Ok(SessionCryptData{
             cipher,
+            stream
         });
     }
 
-    pub fn send_message(&self, stream: &mut TcpStream, message: Message) -> Result<(), std::io::Error>{
+    pub fn send_message(&mut self, message: Message) -> Result<(), std::io::Error>{
 
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let message = message.to_string();
@@ -188,13 +190,13 @@ impl SessionCryptData{
             ciphertext,
         };
         let serialized = serialize(&encrypted_message).expect("Failed to serialize encrypted message");
-        HandshakeData::write_length_prefixed(stream, &serialized)?;
+        HandshakeData::write_length_prefixed(&mut self.stream, &serialized)?;
         Ok(())
 
     }
 
-    pub fn recieve_message(&self, stream: &mut TcpStream) -> Result<Message, std::io::Error>{
-        let buf = HandshakeData::read_length_prefixed(stream)?;
+    pub fn recieve_message(&mut self) -> Result<Message, std::io::Error>{
+        let buf = HandshakeData::read_length_prefixed(&mut self.stream)?;
         let encrypted_message: EncryptedMessage = bincode::deserialize(&buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let nonce = XNonce::from_slice(&encrypted_message.nonce);
@@ -251,22 +253,22 @@ mod tests {
 
     #[test]
     fn test_session_establishment() {
-        let (mut client, mut server) = setup_tcp_pair();
+        let (client, server) = setup_tcp_pair();
         
         let client_thread = thread::spawn(move || {
-            SessionCryptData::start_session(&mut client).unwrap()
+            SessionCryptData::start_session(client).unwrap()
         });
 
-        let _server_session = SessionCryptData::recieve_session(&mut server).unwrap();
+        let _server_session = SessionCryptData::recieve_session(server).unwrap();
         let _client_session = client_thread.join().unwrap();
     }
 
     #[test]
     fn test_message_exchange() {
-        let (mut client, mut server) = setup_tcp_pair();
+        let (client, server) = setup_tcp_pair();
         
         let client_thread = thread::spawn(move || {
-            let session = SessionCryptData::start_session(&mut client).unwrap();
+            let mut session = SessionCryptData::start_session(client).unwrap();
             
             // Send a test message
             let msg = Message {
@@ -279,17 +281,17 @@ mod tests {
                     .as_secs(),
             };
             
-            session.send_message(&mut client, msg).unwrap();
+            session.send_message(msg).unwrap();
             
             // Receive response
-            let response = session.recieve_message(&mut client).unwrap();
+            let response = session.recieve_message().unwrap();
             response
         });
 
-        let server_session = SessionCryptData::recieve_session(&mut server).unwrap();
+        let mut server_session = SessionCryptData::recieve_session(server).unwrap();
         
         // Receive client message
-        let received = server_session.recieve_message(&mut server).unwrap();
+        let received = server_session.recieve_message().unwrap();
         assert_eq!(received.sender_id, "client");
         assert_eq!(received.to_id, "server");
         assert_eq!(received.contents, "Hello server!");
@@ -304,7 +306,7 @@ mod tests {
                 .unwrap()
                 .as_secs(),
         };
-        server_session.send_message(&mut server, response).unwrap();
+        server_session.send_message(response).unwrap();
         
         let client_received = client_thread.join().unwrap();
         assert_eq!(client_received.sender_id, "server");
