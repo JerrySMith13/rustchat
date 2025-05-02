@@ -83,10 +83,10 @@ struct EncryptedMessage {
  */
 #[derive(Serialize, Deserialize)]
 pub struct Message{
-    sender_id: String,
-    to_id: String,
-    contents: String,
-    timestamp: u64,
+    pub sender_id: String,
+    pub to_id: String,
+    pub contents: String,
+    pub timestamp: u64,
 }
 impl ToString for Message{
     fn to_string(&self) -> String{
