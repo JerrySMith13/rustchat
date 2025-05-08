@@ -1,6 +1,7 @@
 pub(crate) 
 use std::net::TcpStream;
-use std::io::{Read, Write};
+use std::io::{self, Error, ErrorKind, Read, Write};
+
 
 
 use bincode::serialize;
@@ -80,8 +81,9 @@ struct EncryptedMessage {
     TIMESTAMP
     MESSAGE_CONTENTS
 
+    if the timestamp = 0, that means that the messaging has been quit.
  */
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Message{
     pub sender_id: String,
     pub to_id: String,
@@ -119,6 +121,12 @@ impl Message{
         });
         
     }   
+
+    pub fn displayable(&self) -> String{
+        format!("{}: {}", self.sender_id, self.contents)
+    }
+
+    
 }
 
 
@@ -149,6 +157,7 @@ impl SessionCryptData{
 
         let cipher = XChaCha20Poly1305::new_from_slice(&shared).unwrap();
 
+        stream.set_nonblocking(true)?;
 
         return Ok(SessionCryptData{
             cipher,
@@ -164,13 +173,12 @@ impl SessionCryptData{
         let peer_public = HandshakeData::recieve_handshake(&mut stream, self_public)?;
         let peer_public = PublicKey::from(peer_public.public_key);
 
-        
-
         let shared = self_secret.diffie_hellman(&peer_public);
         let shared = Self::derive_key(shared.as_bytes());
 
         let cipher = XChaCha20Poly1305::new_from_slice(&shared).unwrap();
 
+        stream.set_nonblocking(true)?;
         return Ok(SessionCryptData{
             cipher,
             stream
@@ -178,7 +186,7 @@ impl SessionCryptData{
     }
 
     pub fn send_message(&mut self, message: Message) -> Result<(), std::io::Error>{
-
+        self.stream.set_nonblocking(false)?;
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let message = message.to_string();
         let msg_bytes = bincode::serialize(&message)
@@ -191,11 +199,13 @@ impl SessionCryptData{
         };
         let serialized = serialize(&encrypted_message).expect("Failed to serialize encrypted message");
         HandshakeData::write_length_prefixed(&mut self.stream, &serialized)?;
+        self.stream.set_nonblocking(true)?;
         Ok(())
 
     }
 
     pub fn recieve_message(&mut self) -> Result<Message, std::io::Error>{
+        self.stream.set_nonblocking(false)?;
         let buf = HandshakeData::read_length_prefixed(&mut self.stream)?;
         let encrypted_message: EncryptedMessage = bincode::deserialize(&buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -205,7 +215,26 @@ impl SessionCryptData{
         let message: String = bincode::deserialize(&decrypted)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let message = Message::from_string(message)?;
+        self.stream.set_nonblocking(true)?;
         Ok(message)
+
+    }
+    pub fn check_data_available(&mut self) -> Result<bool, io::Error> {
+        let mut peek_buf = [0u8; 1];
+        match self.stream.peek(&mut peek_buf) {
+            Ok(0) => Err(Error::new(ErrorKind::UnexpectedEof, "Connection Closed")),    // Connection closed
+            Ok(_) => Ok(true),     // Data available
+            Err(e) if e.kind() == ErrorKind::WouldBlock => Ok(false), // No data available
+            Err(e) => Err(e),      // Other error
+        }
+    }
+    pub fn wait_data_available(&mut self) -> Result<(), io::Error>{
+        loop{
+            match self.check_data_available(){
+                Ok(val) => if val{return Ok(());} else {continue;}
+                Err(e) => { return Err(e); }
+            }
+        }
     }
 
 }
@@ -284,6 +313,7 @@ mod tests {
             session.send_message(msg).unwrap();
             
             // Receive response
+            session.wait_data_available().unwrap();
             let response = session.recieve_message().unwrap();
             response
         });
@@ -291,6 +321,7 @@ mod tests {
         let mut server_session = SessionCryptData::recieve_session(server).unwrap();
         
         // Receive client message
+        
         let received = server_session.recieve_message().unwrap();
         assert_eq!(received.sender_id, "client");
         assert_eq!(received.to_id, "server");
@@ -330,5 +361,46 @@ mod tests {
         assert_eq!(parsed.to_id, "bob");
         assert_eq!(parsed.contents, "Hello!");
         assert_eq!(parsed.timestamp, 1234567890);
+    }
+    #[test]
+    fn test_stream_data_check() {
+        let (client, server) = setup_tcp_pair();
+        
+        let client_thread = thread::spawn(move || {
+            let mut session = SessionCryptData::start_session(client).unwrap();
+            
+            // Set non-blocking mode
+            session.stream.set_nonblocking(true).unwrap();
+            
+            // Initially there should be no data
+            assert_eq!(session.check_data_available().unwrap(), false);
+            
+            // Wait for server data
+            thread::sleep(std::time::Duration::from_millis(100));
+            
+            // Now there should be data
+            assert_eq!(session.check_data_available().unwrap(), true);
+            
+            // Verify we can still read the message
+            let msg = session.recieve_message().unwrap();
+            assert_eq!(msg.contents, "Test message");
+        });
+
+        let mut server_session = SessionCryptData::recieve_session(server).unwrap();
+        
+        // Send a test message
+        let msg = Message {
+            sender_id: "server".to_string(),
+            to_id: "client".to_string(),
+            contents: "Test message".to_string(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        };
+        
+        server_session.send_message(msg).unwrap();
+        
+        client_thread.join().unwrap();
     }
 }
